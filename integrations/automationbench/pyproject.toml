@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inspect-automationbench-admission"
+version = "0.1.0"
+description = "Offline-first AutomationBench adapter admission for Inspect AI"
+requires-python = ">=3.13"
+dependencies = ["inspect-ai", "jsonschema>=4.23", "anyio>=4.9"]
+
+[project.optional-dependencies]
+native = ["automation-bench @ git+https://github.com/zapier/AutomationBench.git@4a8e1061254004d9dac807054eed33fad7d1ff14", "verifiers==0.2.0"]
+test = ["pytest>=8.3", "pytest-socket>=0.7", "ruff>=0.14"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --disable-socket"
+markers = ["native: requires the pinned native AutomationBench environment"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]

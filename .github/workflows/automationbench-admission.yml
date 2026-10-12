@@ -1,0 +1,45 @@
+name: AutomationBench offline admission
+on:
+  push:
+    branches: ['integration/automationbench-admission']
+    paths:
+      - 'integrations/automationbench/**'
+      - '.github/workflows/automationbench-admission.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AUTOMATIONBENCH_STRICT_ASSERTIONS: '1'
+      HF_HUB_OFFLINE: '1'
+      HF_DATASETS_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install fork and pinned native runtime
+        run: python -m pip install -e . -e './integrations/automationbench[native,test]'
+      - name: Record source and dependencies
+        run: |
+          mkdir -p admission-results
+          git rev-parse HEAD > admission-results/inspect-commit.txt
+          python -m pip freeze > admission-results/installed-packages.txt
+          python -c 'import json; from inspect_automationbench.native import verify_native; print(json.dumps(verify_native(), indent=2))' > admission-results/native-binding.json
+      - name: Lint extension
+        run: python -m ruff check integrations/automationbench
+      - name: Real Inspect and native environment tests, external sockets blocked
+        if: ${{ !cancelled() }}
+        run: >-
+          python -m pytest -c integrations/automationbench/pyproject.toml
+          integrations/automationbench/tests --allow-unix-socket
+          --junitxml=admission-results/pytest.xml -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: automationbench-offline-admission
+          path: admission-results/
+          if-no-files-found: warn

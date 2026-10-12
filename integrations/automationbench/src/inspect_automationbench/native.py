@@ -37,7 +37,7 @@ def verify_native() -> dict[str, Any]:
 
 
 def info_dict(row: dict[str, Any]) -> dict[str, Any]:
-    """Decode native info without replacing missing or invalid information."""
+    """Decode native JSON info without replacing missing or invalid information."""
     info = row["info"]
     info = json.loads(info) if isinstance(info, str) else info
     if not isinstance(info, dict):
@@ -45,8 +45,16 @@ def info_dict(row: dict[str, Any]) -> dict[str, Any]:
     return info
 
 
+def make_environment(dataset: Any) -> Any:
+    """Let the official environment format questions into model prompts."""
+    from automationbench.rubric import create_rubric
+    from automationbench.runner import AutomationBenchEnv
+
+    return AutomationBenchEnv(dataset=dataset, rubric=create_rubric(), toolset="api")
+
+
 def select_task(domain: str, task_id: int) -> tuple[Any, dict[str, Any]]:
-    """Select exactly one native example by its original ID, never row position."""
+    """Select one exposed example and apply native question/prompt formatting."""
     from automationbench.domains import get_domain_dataset
 
     if domain not in {"hr", "finance"}:
@@ -58,9 +66,14 @@ def select_task(domain: str, task_id: int) -> tuple[Any, dict[str, Any]]:
     if len(matches) != 1:
         raise ValueError(f"Expected one native example_id={task_id}; found {len(matches)}")
     selected = dataset.select(matches)
-    row = dict(selected[0])
-    if not info_dict(row).get("assertions"):
+    env = make_environment(selected)
+    # Raw dataset rows contain question and JSON-encoded info, not runtime prompt/state.
+    row = copy.deepcopy(dict(env.dataset[0]))
+    row["info"] = info_dict(row)
+    if not row["info"].get("assertions"):
         raise ValueError("Native task has no assertions")
+    if not isinstance(row.get("prompt"), list):
+        raise ValueError("Native formatter did not produce a chat prompt")
     return selected, row
 
 
@@ -77,12 +90,11 @@ class NativeSession:
 
     @classmethod
     async def create(cls, dataset: Any, row: dict[str, Any]) -> NativeSession:
-        """Delegate normalization, allowed services, and initialization to upstream."""
-        from automationbench.rubric import create_rubric
-        from automationbench.runner import AutomationBenchEnv
-
-        env = AutomationBenchEnv(dataset=dataset, rubric=create_rubric(), toolset="api")
-        state = await env.setup_state(copy.deepcopy(row))
+        """Delegate normalization, allowed services, and world setup to upstream."""
+        env = make_environment(dataset)
+        prepared = copy.deepcopy(row)
+        prepared["info"] = info_dict(prepared)
+        state = await env.setup_state(prepared)
         if state is None or "world" not in state:
             raise RuntimeError("Native initialization returned no world")
         return cls(env, row, state)
@@ -107,7 +119,7 @@ class NativeSession:
         return content
 
     def finish(self) -> dict[str, Any]:
-        """Retain native scoring and host-only evidence; assertion errors remain unknown."""
+        """Retain native scoring; assertion exceptions remain unknown, not zero."""
         import os
 
         from automationbench.rubric import partial_credit, task_completed_correctly

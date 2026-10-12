@@ -29,8 +29,10 @@ jobs:
           git rev-parse HEAD > admission-results/inspect-commit.txt
           python -m pip freeze > admission-results/installed-packages.txt
           python -c 'import json; from inspect_automationbench.native import verify_native; print(json.dumps(verify_native(), indent=2))' > admission-results/native-binding.json
-      - name: Lint extension
-        run: python -m ruff check integrations/automationbench
+      - name: Lint extension without modifying the tested source
+        run: |
+          python -m ruff check integrations/automationbench --diff || true
+          python -m ruff check integrations/automationbench
       - name: Real Inspect and native environment tests, external sockets blocked
         if: ${{ !cancelled() }}
         run: >-

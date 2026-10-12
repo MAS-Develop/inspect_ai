@@ -2,7 +2,12 @@
 
 import pytest
 
-from inspect_automationbench.contracts import AdmissionStop, Budget, check_call, response_is_acceptable
+from inspect_automationbench.contracts import (
+    AdmissionStop,
+    Budget,
+    check_call,
+    response_is_acceptable,
+)
 
 SCHEMA = {"type": "object", "properties": {"method": {"type": "string"}, "url": {"type": "string"}}, "required": ["url"]}
 

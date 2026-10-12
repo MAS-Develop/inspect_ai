@@ -28,7 +28,14 @@ def main() -> None:
         parser.error("--live requires an explicit --model; no provider is silently selected")
 
     from inspect_ai import eval
-    from inspect_ai.model import ModelOutput, ModelUsage, get_model
+    from inspect_ai.model import (
+        ChatCompletionChoice,
+        ChatMessageAssistant,
+        ModelOutput,
+        ModelUsage,
+        get_model,
+    )
+    from inspect_ai.tool import ToolCall
 
     from .task import RunConfig, automationbench_task
 
@@ -41,7 +48,20 @@ def main() -> None:
         model = get_model(args.model)
     else:
         def scripted(input, tools, tool_choice, config):
-            output = ModelOutput.from_content("mockllm", "Offline wiring check; no task solution attempted.")
+            # One native discovery call per role exercises schema and dispatch.
+            # Inspect's role-local transcript, not a shared counter, drives replay.
+            if not any(message.role == "tool" for message in input):
+                output = ModelOutput(model="mockllm", choices=[ChatCompletionChoice(
+                    message=ChatMessageAssistant(content="", tool_calls=[ToolCall(
+                        id="offline-search", function="api_search", arguments={
+                            "query": "slack" if args.domain == "hr" else "gmail", "top_k": 5,
+                        },
+                    )]), stop_reason="tool_calls",
+                )])
+            else:
+                output = ModelOutput.from_content(
+                    "mockllm", "Offline wiring check; no task solution attempted."
+                )
             output.usage = ModelUsage(input_tokens=10, output_tokens=10, total_tokens=20)
             return output
         model = get_model("mockllm/model", custom_outputs=scripted)
@@ -49,15 +69,24 @@ def main() -> None:
     log = logs[0]
     samples = log.samples or []
     record = samples[0].metadata.get("admission", {}) if samples else {}
-    successful = log.status == "success" and len(samples) == 1 and not samples[0].error
+    native = record.get("native", {})
+    successful = (
+        log.status == "success"
+        and len(samples) == 1
+        and samples[0].error is None
+        and record.get("termination") == "completed"
+        and native.get("scoring_error") is None
+        and native.get("task_completed_correctly") is not None
+        and native.get("partial_credit") is not None
+    )
     print(json.dumps({"mode": "live" if args.live else "scripted_offline",
                       "inspect_status": log.status, "wiring_completed": successful,
-                      "native_task_success": record.get("native", {}).get("task_completed_correctly"),
-                      "native_scoring_error": record.get("native", {}).get("scoring_error"),
+                      "native_task_success": native.get("task_completed_correctly"),
+                      "native_scoring_error": native.get("scoring_error"),
                       "termination": record.get("termination"),
                       "budget": record.get("budget"), "log": log.location},
                      ensure_ascii=False, indent=2))
-    if not successful or record.get("native", {}).get("scoring_error"):
+    if not successful:
         raise SystemExit(1)
 
 
